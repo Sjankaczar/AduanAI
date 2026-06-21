@@ -1,8 +1,18 @@
+export interface Attachment {
+  id: string;
+  name: string;
+  url: string;
+  type: 'image' | 'video' | 'document';
+  size: number;
+}
+
 export interface Message {
   id: string;
   sender: 'citizen' | 'admin';
   text: string;
   timestamp: string;
+  status?: 'sending' | 'sent' | 'failed';
+  attachments?: Attachment[];
 }
 
 export interface Report {
@@ -15,4 +25,6 @@ export interface Report {
   preview: string;
   originalComplaint: string;
   date: string;
+  attachments: Attachment[];
+  expiresAt?: number;
 }
