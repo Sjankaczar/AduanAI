@@ -1,0 +1,6 @@
+{
+  "name": "TeksAduan AI",
+  "description": "Platform pelaporan masyarakat berbasis Kecerdasan Artifisial (NLP) dengan antarmuka chat.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
