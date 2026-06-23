@@ -8,10 +8,12 @@ const socket: Socket = io('http://localhost:3001');
 // --- State ---
 interface AppState {
   reports: Report[];
+  isLoaded: boolean;
 }
 
 const defaultInitialState: AppState = {
   reports: [],
+  isLoaded: false,
 };
 
 // --- Actions ---
@@ -29,7 +31,7 @@ type AppAction =
 function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'SYNC_STATE':
-      return action.payload;
+      return { ...state, reports: action.payload.reports, isLoaded: true };
 
     // Optimistic UI updates
     case 'ADD_REPORT':
@@ -111,7 +113,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .then(data => {
         dispatch({ type: 'SYNC_STATE', payload: { reports: data } });
       })
-      .catch(err => console.error("Failed to fetch initial state", err));
+      .catch(err => {
+        console.error("Failed to fetch initial state", err);
+        // Dispatch to set isLoaded to true even if it fails, to avoid infinite loading
+        dispatch({ type: 'SYNC_STATE', payload: { reports: [] } });
+      });
 
     // 2. Listen to WebSocket updates
     socket.on('stateUpdate', (data: Report[]) => {

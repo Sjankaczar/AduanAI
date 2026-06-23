@@ -7,6 +7,24 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      window.addEventListener('error', function(e) {
+        var errDiv = document.createElement('div');
+        errDiv.style.cssText = 'color:red;padding:20px;font-family:monospace;z-index:9999;position:fixed;top:0;left:0;background:white;width:100%;height:100%;';
+        errDiv.innerHTML = '<h2>Global Error Caught!</h2>' + 
+          '<p><strong>Message:</strong> ' + e.message + '</p>' + 
+          '<p><strong>File:</strong> ' + e.filename + ':' + e.lineno + ':' + e.colno + '</p>' +
+          '<pre>' + (e.error && e.error.stack ? e.error.stack : '') + '</pre>';
+        document.body.appendChild(errDiv);
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        var errDiv = document.createElement('div');
+        errDiv.style.cssText = 'color:red;padding:20px;font-family:monospace;z-index:9999;position:fixed;top:0;left:0;background:white;width:100%;height:100%;';
+        errDiv.innerHTML = '<h2>Unhandled Promise Rejection!</h2>' + 
+          '<p><strong>Reason:</strong> ' + e.reason + '</p>';
+        document.body.appendChild(errDiv);
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

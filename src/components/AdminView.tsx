@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Search, Filter, AlertTriangle, Send, User, ShieldAlert, X, CheckCircle, RotateCcw, ChevronDown, Sparkles, Info, Plus, FileText, FileImage, FileVideo, Check, CheckCheck } from 'lucide-react';
+import { Search, Filter, AlertTriangle, Send, User, ShieldAlert, X, CheckCircle, RotateCcw, ChevronDown, Sparkles, Info, Plus, FileText, FileImage, FileVideo, Check, CheckCheck, Camera } from 'lucide-react';
 import { Report, Attachment } from '../types';
 import { AttachmentModal } from './AttachmentModal';
+import { playMenuOpenSound, playMenuCloseSound, playSendAirplaneSound, playMarbleDropSound } from '../utils/audio';
 
 const ALL_CATEGORIES = ['Semua', 'Infrastruktur', 'Keamanan', 'Kebersihan', 'Pelayanan Publik', 'Darurat', 'Umum'];
 const ALL_STATUSES: Array<Report['status']> = ['Menunggu', 'Ditinjau', 'Diproses', 'Selesai'];
@@ -14,16 +15,20 @@ export function AdminView() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('Semua');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
   const [statusSaveNotification, setStatusSaveNotification] = useState<string | null>(null);
   const [viewingAttachment, setViewingAttachment] = useState<Attachment | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const filterRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const statusDropdownRef = useRef<HTMLDivElement>(null);
+  const adminImageInputRef = useRef<HTMLInputElement>(null);
+  const adminDocInputRef = useRef<HTMLInputElement>(null);
+  const [isAdminAttachmentMenuOpen, setIsAdminAttachmentMenuOpen] = useState(false);
 
   // MAX 10MB
   const MAX_FILE_SIZE = 10 * 1024 * 1024;
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAdminFileSelect = (e: React.ChangeEvent<HTMLInputElement>, forceDoc: boolean = false) => {
     const files = e.target.files;
     if (!files) return;
     for (let i = 0; i < files.length; i++) {
@@ -31,8 +36,10 @@ export function AdminView() {
       if (file.size > MAX_FILE_SIZE) continue;
       
       let type: 'image' | 'video' | 'document' = 'document';
-      if (file.type.startsWith('image/')) type = 'image';
-      else if (file.type.startsWith('video/')) type = 'video';
+      if (!forceDoc) {
+        if (file.type.startsWith('image/')) type = 'image';
+        else if (file.type.startsWith('video/')) type = 'video';
+      }
 
       const attachment: Attachment = {
         id: `att-admin-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -43,10 +50,13 @@ export function AdminView() {
       };
       setAttachments((prev) => [...prev, attachment]);
     }
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (adminImageInputRef.current) adminImageInputRef.current.value = '';
+    if (adminDocInputRef.current) adminDocInputRef.current.value = '';
+    setIsAdminAttachmentMenuOpen(false);
   };
 
   const removeAttachment = (id: string) => {
+    playMarbleDropSound();
     setAttachments((prev) => {
       const att = prev.find((a) => a.id === id);
       if (att) URL.revokeObjectURL(att.url);
@@ -60,23 +70,30 @@ export function AdminView() {
 
     // Search filter
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      const keywords = searchQuery.toLowerCase().split(/\s+/).filter(k => k.length > 0);
       results = results.filter(r => {
-        // Tentukan label prioritas berdasarkan skor untuk keperluan pencarian
+        // Tentukan label prioritas berdasarkan skor untuk keperluan pencarian (tingkat penanganan)
         let priorityLabel = 'rendah biasa';
-        if (r.aiPriorityScore >= 80) priorityLabel = 'tinggi segera harus';
+        if (r.aiPriorityScore >= 80) priorityLabel = 'tinggi harus segera';
         else if (r.aiPriorityScore >= 50) priorityLabel = 'menengah';
 
-        const matchName = r.citizenName.toLowerCase().includes(q);
-        const matchComplaint = r.originalComplaint.toLowerCase().includes(q);
-        const matchPreview = r.preview.toLowerCase().includes(q);
-        const matchCategory = r.aiCategory.toLowerCase().includes(q);
-        const matchId = r.id.toLowerCase().includes(q);
-        const matchStatus = r.status.toLowerCase().includes(q);
-        const matchPriority = priorityLabel.includes(q);
-        const matchMessages = r.messages.some(m => m.text.toLowerCase().includes(q));
+        // Gabungkan seluruh teks yang bisa dicari ke dalam satu string panjang
+        const searchableText = [
+          r.citizenName,
+          r.originalComplaint,
+          r.preview,
+          r.aiCategory,
+          r.id,
+          r.status,
+          r.date,
+          r.aiPriorityScore,
+          priorityLabel,
+          ...r.messages.map(m => m.text),
+          ...r.messages.map(m => m.timestamp)
+        ].map(val => String(val || '').toLowerCase()).join(' ');
 
-        return matchName || matchComplaint || matchPreview || matchCategory || matchId || matchStatus || matchPriority || matchMessages;
+        // Laporan lolos jika SETIAP kata kunci (keyword) ada di dalam searchableText
+        return keywords.every(kw => searchableText.includes(kw));
       });
     }
 
@@ -109,7 +126,16 @@ export function AdminView() {
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
-        setShowFilterDropdown(false);
+        setShowFilterDropdown((prev) => {
+          if (prev) playMenuCloseSound();
+          return false;
+        });
+      }
+      if (statusDropdownRef.current && !statusDropdownRef.current.contains(e.target as Node)) {
+        setIsStatusDropdownOpen((prev) => {
+          if (prev) playMenuCloseSound();
+          return false;
+        });
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -162,6 +188,7 @@ export function AdminView() {
   const handleSendReply = async () => {
     if (!replyText.trim() && attachments.length === 0) return;
     if (!selectedReport) return;
+    playSendAirplaneSound();
 
     const messageId = `msg-admin-${Date.now()}`;
     const now = new Date();
@@ -234,7 +261,7 @@ export function AdminView() {
               />
               {searchQuery && (
                 <button
-                  onClick={() => setSearchQuery('')}
+                  onClick={() => { setSearchQuery(''); playMarbleDropSound(); }}
                   className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 transition-colors"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -243,7 +270,12 @@ export function AdminView() {
             </div>
             <div className="relative" ref={filterRef}>
               <button
-                onClick={() => setShowFilterDropdown(!showFilterDropdown)}
+                onClick={() => {
+                  const newState = !showFilterDropdown;
+                  setShowFilterDropdown(newState);
+                  if (newState) playMenuOpenSound();
+                  else playMenuCloseSound();
+                }}
                 className={`p-2 border rounded-lg transition-colors ${
                   filterCategory !== 'Semua'
                     ? 'border-blue-400 bg-blue-50 text-blue-600'
@@ -252,27 +284,32 @@ export function AdminView() {
               >
                 <Filter className="w-4 h-4" />
               </button>
-              {showFilterDropdown && (
-                <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl border border-slate-200 shadow-lg z-50 py-1 animate-[fadeIn_0.15s_ease-out]">
-                  <p className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Kategori</p>
-                  {ALL_CATEGORIES.map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => {
-                        setFilterCategory(cat);
-                        setShowFilterDropdown(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                        filterCategory === cat
-                          ? 'bg-blue-50 text-blue-700 font-semibold'
-                          : 'text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <div 
+                className={`absolute right-0 top-full mt-2 w-48 bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 shadow-xl z-50 py-1 transition-all duration-300 origin-top-right ${
+                  showFilterDropdown 
+                    ? 'opacity-100 scale-100 translate-y-0' 
+                    : 'opacity-0 scale-95 pointer-events-none -translate-y-2'
+                }`}
+              >
+                <p className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Kategori</p>
+                {ALL_CATEGORIES.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => {
+                      setFilterCategory(cat);
+                      setShowFilterDropdown(false);
+                      playMenuCloseSound();
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                      filterCategory === cat
+                        ? 'bg-blue-50 text-blue-700 font-semibold'
+                        : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           {/* Active filter indicator */}
@@ -284,7 +321,7 @@ export function AdminView() {
               {filterCategory !== 'Semua' && (
                 <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
                   {filterCategory}
-                  <button onClick={() => setFilterCategory('Semua')} className="hover:text-blue-900">
+                  <button onClick={() => { setFilterCategory('Semua'); playMarbleDropSound(); }} className="hover:text-blue-900">
                     <X className="w-3 h-3" />
                   </button>
                 </span>
@@ -344,22 +381,53 @@ export function AdminView() {
             <div>
               <div className="flex items-center gap-3 mb-1">
                 <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Tiket {selectedReport.id}</h2>
-                <div className="relative inline-flex">
-                  <select
-                    value={selectedReport.status}
-                    onChange={(e) => handleStatusChange(e.target.value as Report['status'])}
-                    className={`text-[10px] uppercase font-bold pl-2 pr-6 py-1 rounded-full appearance-none cursor-pointer border outline-none transition-colors ${
+                <div className="relative inline-flex" ref={statusDropdownRef}>
+                  <button
+                    onClick={() => {
+                      const newState = !isStatusDropdownOpen;
+                      setIsStatusDropdownOpen(newState);
+                      if (newState) playMenuOpenSound();
+                      else playMenuCloseSound();
+                    }}
+                    className={`text-[10px] uppercase font-bold pl-3 pr-7 py-1.5 rounded-full border outline-none transition-colors flex items-center ${
                       selectedReport.status === 'Menunggu' ? 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200' :
                       selectedReport.status === 'Ditinjau' ? 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200' :
                       selectedReport.status === 'Diproses' ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200' :
                       'bg-green-100 text-green-700 border-green-200 hover:bg-green-200'
                     }`}
                   >
+                    {selectedReport.status}
+                    <ChevronDown className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 opacity-60" />
+                  </button>
+
+                  <div 
+                    className={`absolute left-0 top-full mt-2 w-44 bg-[#1e2329]/95 backdrop-blur-xl rounded-2xl border border-white/10 shadow-2xl z-50 py-2 transition-all duration-300 origin-top-left ${
+                      isStatusDropdownOpen 
+                        ? 'opacity-100 scale-100 translate-y-0' 
+                        : 'opacity-0 scale-95 pointer-events-none -translate-y-2'
+                    }`}
+                  >
                     {ALL_STATUSES.map(s => (
-                      <option key={s} value={s}>{s}</option>
+                      <button
+                        key={s}
+                        onClick={() => {
+                          handleStatusChange(s);
+                          setIsStatusDropdownOpen(false);
+                          playMenuCloseSound();
+                        }}
+                        className={`w-full text-left px-3 py-2.5 text-xs font-bold tracking-wide transition-colors flex items-center gap-2.5 ${
+                          selectedReport.status === s
+                            ? 'text-white bg-white/10'
+                            : 'text-slate-300 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <div className="w-4 flex justify-center">
+                          {selectedReport.status === s && <Check className="w-4 h-4 text-emerald-400" />}
+                        </div>
+                        {s.toUpperCase()}
+                      </button>
                     ))}
-                  </select>
-                  <ChevronDown className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-60" />
+                  </div>
                 </div>
               </div>
               <p className="text-sm text-slate-500 font-medium flex items-center gap-1.5">
@@ -582,19 +650,77 @@ export function AdminView() {
               </div>
             )}
 
-            <div className="flex items-end gap-2 bg-slate-50 border border-slate-200 rounded-2xl p-2 focus-within:border-slate-400 focus-within:bg-white transition-all shadow-sm">
+            <div className="flex items-end gap-2 bg-slate-50 border border-slate-200 rounded-2xl p-2 focus-within:border-slate-400 focus-within:bg-white transition-all shadow-sm relative">
               <input
-                ref={fileInputRef}
+                ref={adminImageInputRef}
                 type="file"
+                accept="image/*,video/*"
                 multiple
-                onChange={handleFileSelect}
+                onChange={(e) => handleAdminFileSelect(e, false)}
                 className="hidden"
               />
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="p-3 bg-white text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors flex-shrink-0 shadow-sm border border-slate-200 mb-0.5"
+              <input
+                ref={adminDocInputRef}
+                type="file"
+                accept="application/pdf,.doc,.docx,text/*"
+                multiple
+                onChange={(e) => handleAdminFileSelect(e, true)}
+                className="hidden"
+              />
+
+              {/* Tilted Floating Attachment Menu */}
+              <div 
+                className={`absolute bottom-full left-4 mb-4 flex flex-col-reverse gap-4 transition-all duration-300 origin-bottom-left z-50 ${
+                  isAdminAttachmentMenuOpen 
+                    ? 'opacity-100 scale-100 translate-y-0' 
+                    : 'opacity-0 scale-50 pointer-events-none translate-y-4'
+                }`}
               >
-                <Plus className="w-5 h-5" />
+                <button
+                  onClick={() => {
+                    setIsAdminAttachmentMenuOpen(false);
+                    playMenuCloseSound();
+                    adminImageInputRef.current?.click();
+                  }}
+                  className="group flex items-center gap-3 transform -rotate-[6deg] hover:-rotate-[2deg] transition-all duration-300"
+                >
+                  <div className="bg-white/95 backdrop-blur-md px-5 py-2.5 rounded-2xl shadow-xl border border-white/40">
+                    <span className="text-sm font-bold text-slate-700">Foto / Video</span>
+                  </div>
+                  <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-600 rounded-[1.25rem] shadow-xl border border-white/20 flex items-center justify-center text-white group-hover:scale-110 transition-transform duration-300">
+                    <Camera className="w-7 h-7 drop-shadow-md" />
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsAdminAttachmentMenuOpen(false);
+                    playMenuCloseSound();
+                    adminDocInputRef.current?.click();
+                  }}
+                  className="group flex items-center gap-3 transform -rotate-[12deg] hover:-rotate-[6deg] transition-all duration-300"
+                >
+                  <div className="bg-white/95 backdrop-blur-md px-5 py-2.5 rounded-2xl shadow-xl border border-white/40">
+                    <span className="text-sm font-bold text-slate-700">Dokumen</span>
+                  </div>
+                  <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-[1.25rem] shadow-xl border border-white/20 flex items-center justify-center text-white group-hover:scale-110 transition-transform duration-300">
+                    <FileText className="w-7 h-7 drop-shadow-md" />
+                  </div>
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  const newState = !isAdminAttachmentMenuOpen;
+                  setIsAdminAttachmentMenuOpen(newState);
+                  if (newState) playMenuOpenSound();
+                  else playMenuCloseSound();
+                }}
+                className={`p-3 transition-colors flex-shrink-0 ${isAdminAttachmentMenuOpen ? 'text-blue-500' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <div className={`w-6 h-6 rounded-full border-2 border-current flex items-center justify-center transition-transform duration-300 ${isAdminAttachmentMenuOpen ? 'rotate-45 scale-110' : 'rotate-0'}`}>
+                  <span className="text-xl leading-none font-medium mb-1">+</span>
+                </div>
               </button>
               <textarea
                 value={replyText}

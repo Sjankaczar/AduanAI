@@ -1,3 +1,4 @@
+console.log("Starting index.js...");
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -10,6 +11,7 @@ app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, {
+  maxHttpBufferSize: 5e7, // 50MB limit to allow base64 file uploads
   cors: {
     origin: "http://localhost:3000",
     methods: ["GET", "POST"]
@@ -48,13 +50,13 @@ io.on('connection', (socket) => {
   // Tambah Report Baru
   socket.on('addReport', async (report) => {
     try {
+      const now = Date.now();
       await dbRun(
-        `INSERT INTO reports (id, citizenName, aiCategory, aiPriorityScore, status, date, originalComplaint, preview, expiresAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [report.id, report.citizenName, report.aiCategory, report.aiPriorityScore, report.status, report.date, report.originalComplaint, report.preview, report.expiresAt || null]
+        `INSERT INTO reports (id, citizenName, aiCategory, aiPriorityScore, status, date, originalComplaint, preview, expiresAt, lastActivityAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [report.id, report.citizenName, report.aiCategory, report.aiPriorityScore, report.status, report.date, report.originalComplaint, report.preview, report.expiresAt || null, now]
       );
       
-      // Broadcast full state update to all connected clients
       const fullData = await getAllReports();
       io.emit('stateUpdate', fullData);
     } catch (e) {
@@ -81,10 +83,22 @@ io.on('connection', (socket) => {
         }
       }
 
-      // Handle Status Updates/Closure logic (sama seperti di frontend AppContext, tapi dipindah ke Backend)
-      const closureRegex = /(terima kasih|makasih|thank you|tengkyu|selesai|itu aja|itu saja|cukup|sudah dibantu|sudah sampaikan|sudah dilaporkan|kami tutup)/i;
-      const isClosure = closureRegex.test(message.text);
+      // Handle Status Updates/Closure logic
+      let isClosure = false;
+      const lowerText = message.text.toLowerCase();
+      
+      if (message.sender === 'citizen') {
+        // Deteksi secara lebih detail (tidak hanya ada katanya, tapi dari konteks)
+        // Warga mengucapkan terima kasih / selesai / cukup
+        isClosure = /(terima kasih|makasih|thank you|tengkyu|udah beres|udah selesai|cukup|sudah dibantu|case closed|laporan selesai)/i.test(lowerText) && 
+                    !/(belum|tidak|bukan|kenapa|tolong|tapi|namun)/i.test(lowerText);
+      } else if (message.sender === 'admin') {
+        // Admin menutup manual dengan chat
+        isClosure = /(kasus ini ditutup|laporan ini ditutup|kami tutup|laporan selesai)/i.test(lowerText);
+      }
+
       const report = await dbGet('SELECT * FROM reports WHERE id = ?', [reportId]);
+      const now = Date.now();
       
       if (report) {
         let newStatus = report.status;
@@ -92,15 +106,14 @@ io.on('connection', (socket) => {
 
         if (isClosure && report.status !== 'Selesai') {
           newStatus = 'Selesai';
-          newExpiresAt = Date.now() + 24 * 60 * 60 * 1000;
+          newExpiresAt = now + 24 * 60 * 60 * 1000;
         } else if (report.status === 'Selesai' && message.sender === 'citizen' && !isClosure) {
           newStatus = 'Menunggu';
           newExpiresAt = null;
         }
 
-        if (newStatus !== report.status || newExpiresAt !== report.expiresAt) {
-          await dbRun('UPDATE reports SET status = ?, expiresAt = ? WHERE id = ?', [newStatus, newExpiresAt, reportId]);
-        }
+        // Update status, expiresAt, and reset lastActivityAt
+        await dbRun('UPDATE reports SET status = ?, expiresAt = ?, lastActivityAt = ? WHERE id = ?', [newStatus, newExpiresAt, now, reportId]);
       }
 
       const fullData = await getAllReports();
@@ -122,7 +135,7 @@ io.on('connection', (socket) => {
         newExpiresAt = null;
       }
 
-      await dbRun('UPDATE reports SET status = ?, expiresAt = ? WHERE id = ?', [status, newExpiresAt, reportId]);
+      await dbRun('UPDATE reports SET status = ?, expiresAt = ?, lastActivityAt = ? WHERE id = ?', [status, newExpiresAt, Date.now(), reportId]);
       
       const fullData = await getAllReports();
       io.emit('stateUpdate', fullData);
@@ -134,7 +147,7 @@ io.on('connection', (socket) => {
   // Update Citizen Name
   socket.on('updateCitizenName', async ({ reportId, name }) => {
     try {
-      await dbRun('UPDATE reports SET citizenName = ? WHERE id = ?', [name, reportId]);
+      await dbRun('UPDATE reports SET citizenName = ?, lastActivityAt = ? WHERE id = ?', [name, Date.now(), reportId]);
       const fullData = await getAllReports();
       io.emit('stateUpdate', fullData);
     } catch (e) {
@@ -151,10 +164,39 @@ io.on('connection', (socket) => {
 setInterval(async () => {
   const now = Date.now();
   try {
-    // Delete expired reports (cascade will handle messages & attachments if schema is correct)
-    await dbRun('DELETE FROM reports WHERE expiresAt IS NOT NULL AND expiresAt <= ?', [now]);
-    const fullData = await getAllReports();
-    io.emit('stateUpdate', fullData);
+    // 1. Delete expired reports
+    const deleteRes = await dbRun('DELETE FROM reports WHERE expiresAt IS NOT NULL AND expiresAt <= ?', [now]);
+    
+    // 2. Check for Inactive reports (Timeout: 3 hari = 3 * 24 * 60 * 60 * 1000 ms)
+    const TIMEOUT_MS = 3 * 24 * 60 * 60 * 1000;
+    
+    const inactiveReports = await dbAll(
+      'SELECT * FROM reports WHERE status != "Selesai" AND lastActivityAt IS NOT NULL AND (? - lastActivityAt) > ?',
+      [now, TIMEOUT_MS]
+    );
+
+    let updated = false;
+    for (const r of inactiveReports) {
+      const newExpiresAt = now + 24 * 60 * 60 * 1000; // hapus dalam 24 jam
+      
+      // Update status to Selesai
+      await dbRun('UPDATE reports SET status = "Selesai", expiresAt = ? WHERE id = ?', [newExpiresAt, r.id]);
+      
+      // Insert automated system message telling the user it was closed
+      const msgId = `msg-autoclose-${now}-${r.id}`;
+      await dbRun(
+        `INSERT INTO messages (id, reportId, sender, text, timestamp, status)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [msgId, r.id, 'admin', 'Sesi ini ditutup otomatis oleh sistem karena tidak ada respons atau aktivitas selama 3 hari terakhir. Jika masalah belum teratasi, silakan buat laporan baru. Terima kasih.', new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }), 'sent']
+      );
+      
+      updated = true;
+    }
+
+    if (deleteRes.changes > 0 || updated) {
+      const fullData = await getAllReports();
+      io.emit('stateUpdate', fullData);
+    }
   } catch (e) {
     console.error('Error during cleanup:', e);
   }

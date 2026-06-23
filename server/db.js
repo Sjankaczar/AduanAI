@@ -16,8 +16,12 @@ db.serialize(() => {
     date TEXT,
     originalComplaint TEXT,
     preview TEXT,
-    expiresAt INTEGER
+    expiresAt INTEGER,
+    lastActivityAt INTEGER
   )`);
+
+  // Pastikan kolom lastActivityAt ada pada database lama
+  db.run(`ALTER TABLE reports ADD COLUMN lastActivityAt INTEGER`, () => {});
 
   // Messages Table
   db.run(`CREATE TABLE IF NOT EXISTS messages (

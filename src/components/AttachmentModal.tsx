@@ -1,5 +1,6 @@
 import { X, Download, FileVideo } from 'lucide-react';
 import { Attachment } from '../types';
+import { playMarbleDropSound } from '../utils/audio';
 
 interface Props {
   attachment: Attachment | null;
@@ -8,6 +9,11 @@ interface Props {
 
 export function AttachmentModal({ attachment, onClose }: Props) {
   if (!attachment) return null;
+
+  const handleClose = () => {
+    playMarbleDropSound();
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 md:p-8 animate-[fadeIn_0.2s_ease-out]">
@@ -31,7 +37,7 @@ export function AttachmentModal({ attachment, onClose }: Props) {
             </a>
             {/* Close Button */}
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="p-1.5 text-slate-500 hover:bg-red-100 hover:text-red-600 rounded-lg transition-colors"
             >
               <X className="w-5 h-5" />
