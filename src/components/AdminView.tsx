@@ -26,6 +26,19 @@ export function AdminView() {
   const adminDocInputRef = useRef<HTMLInputElement>(null);
   const [isAdminAttachmentMenuOpen, setIsAdminAttachmentMenuOpen] = useState(false);
 
+  // --- Scroll State ---
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    setShowScrollButton(scrollHeight - scrollTop - clientHeight > 150);
+  };
+
+  const scrollToBottom = () => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   // MAX 10MB
   const MAX_FILE_SIZE = 10 * 1024 * 1024;
   const handleAdminFileSelect = (e: React.ChangeEvent<HTMLInputElement>, forceDoc: boolean = false) => {
@@ -527,7 +540,7 @@ export function AdminView() {
           </div>
 
           {/* Chat Box */}
-          <div className="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-6 bg-[#f0f2f5] min-h-[300px]">
+          <div className="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-6 bg-[#f0f2f5] min-h-[300px] relative" ref={chatContainerRef} onScroll={handleScroll}>
             {selectedReport.messages.map((m) => (
               <div key={m.id} className={`flex flex-col ${m.sender === 'admin' ? 'items-end' : 'items-start'}`}>
                 <span className="text-xs text-slate-500 font-medium mb-1.5 mx-1 flex items-center gap-1 tracking-wide">
@@ -596,6 +609,16 @@ export function AdminView() {
               </div>
             ))}
             <div ref={chatEndRef} />
+          </div>
+
+          {/* Scroll to Bottom Button */}
+          <div className={`absolute right-6 md:right-8 bottom-32 z-40 transition-all duration-300 ${showScrollButton ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-4 scale-50 pointer-events-none'}`}>
+            <button
+              onClick={scrollToBottom}
+              className="w-9 h-9 bg-white/90 backdrop-blur-md rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.15)] border border-slate-200 flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-white transition-colors"
+            >
+              <ChevronDown className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Admin Reply Footer */}

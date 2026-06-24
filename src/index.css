@@ -54,3 +54,63 @@
   opacity: 0;
   animation: none;
 }
+
+/* ===== Ultra-Smooth Liquid/Jelly Spotlight Animations ===== */
+
+/* The background jelly blob */
+@keyframes liquidJellyBg {
+  0% {
+    opacity: 0;
+    transform: translateY(60px) scale(0.05, 0.05);
+    border-radius: 50%;
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(-5px) scale(0.1, 1.4);
+    border-radius: 3rem;
+  }
+  45% {
+    transform: translateY(5px) scale(1.1, 0.7);
+    border-radius: 2rem;
+  }
+  65% {
+    transform: translateY(-2px) scale(0.95, 1.1);
+  }
+  85% {
+    transform: translateY(1px) scale(1.02, 0.98);
+  }
+  100% {
+    transform: translateY(0px) scale(1, 1);
+    border-radius: 2rem;
+  }
+}
+
+/* The inner content appearing */
+@keyframes liquidJellyContent {
+  0%, 35% { 
+    opacity: 0; 
+    transform: scale(0.8) translateY(10px); 
+    filter: blur(4px);
+  }
+  100% { 
+    opacity: 1; 
+    transform: scale(1) translateY(0); 
+    filter: blur(0);
+  }
+}
+
+.animate-liquid-jelly-bg {
+  animation: liquidJellyBg 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  transform-origin: bottom center;
+}
+
+.animate-liquid-jelly-content {
+  animation: liquidJellyContent 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.liquid-collapsed-jelly {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(20px) scale(0.5);
+  transition: all 0.3s ease-out;
+}
