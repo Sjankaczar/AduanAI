@@ -233,7 +233,7 @@ export function CitizenChatView() {
   //  SUBMIT REPORT (Laman Pengajuan → Chat)
   // =============================================
   const handleSubmitReport = () => {
-    if (pendingAttachments.length === 0) return;
+    if (!complaintText.trim()) return;
     playSendAirplaneSound();
 
     const now = new Date();
@@ -270,15 +270,23 @@ export function CitizenChatView() {
     });
 
     // Send first message: evidence (foto/video)
-    const evidenceMsgId = `msg-evidence-${Date.now()}`;
-    addMessage(reportId, {
-      id: evidenceMsgId,
-      sender: 'citizen',
-      text: '',
-      timestamp: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-      status: 'sent',
-      attachments: pendingAttachments,
-    });
+    let evidenceMsgId: string | undefined;
+
+    if (pendingAttachments.length > 0) {
+      evidenceMsgId = `msg-evidence-${Date.now()}`;
+
+      addMessage(reportId, {
+        id: evidenceMsgId,
+        sender: 'citizen',
+        text: '',
+        timestamp: now.toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        status: 'sent',
+        attachments: pendingAttachments,
+      });
+    }
 
     // If there's optional complaint text, send it as a second message
     if (complaintText.trim()) {
@@ -306,7 +314,7 @@ export function CitizenChatView() {
     setComplaintText('');
 
     // Start AI analyzing animation → auto-reply after ~5s
-    startAnalyzingAnimation(reportId, evidenceMsgId);
+    startAnalyzingAnimation(reportId);
   };
 
   // =============================================
@@ -538,7 +546,7 @@ export function CitizenChatView() {
           {/* Title */}
           <div className="text-center mb-2">
             <h3 className="text-lg font-bold text-slate-900">Ajukan Pengaduan</h3>
-            <p className="text-sm text-slate-500 mt-1">Upload bukti foto/video terlebih dahulu untuk memulai laporan</p>
+            <p className="text-sm text-slate-500 mt-1">Jelaskan keluhan Anda terlebih dahulu. Foto/video dapat ditambahkan sebagai bukti pendukung.</p>
           </div>
 
           {/* Upload Area */}
@@ -605,7 +613,7 @@ export function CitizenChatView() {
           {/* Optional Complaint Text */}
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2">
-              Deskripsi Keluhan (Opsional)
+              Deskripsi Keluhan
             </label>
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
               <textarea
@@ -622,11 +630,11 @@ export function CitizenChatView() {
         <div className="p-4 bg-white border-t border-slate-200 shrink-0">
           <button
             onClick={handleSubmitReport}
-            disabled={pendingAttachments.length === 0}
+            disabled={!complaintText.trim()}
             className="w-full bg-[#00a884] text-white font-semibold py-3.5 rounded-xl hover:bg-[#008f6f] disabled:opacity-50 disabled:bg-slate-200 disabled:text-slate-500 transition-colors shadow-sm flex items-center justify-center gap-2 text-base"
           >
             {pendingAttachments.length === 0 ? (
-              'Upload bukti terlebih dahulu'
+              'Isi deskripsi terlebih dahulu'
             ) : (
               <>
                 Kirim Pengaduan

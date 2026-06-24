@@ -1,1 +1,18 @@
-node_modules
+node_modules/
+
+# Hasil build production
+dist/
+dist-ssr/
+
+# File environment yang menyimpan API Key (Sangat Penting)
+.env
+.env.*
+.env.local
+
+# Log error npm
+npm-debug.log*
+yarn-error.log*
+
+# File sistem operasi
+.DS_Store
+Thumbs.db
