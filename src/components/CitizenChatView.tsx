@@ -1,10 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, X, FileVideo, FileText, AlertTriangle, RotateCcw, UploadCloud, User, Info, Check, CheckCheck, Camera, Loader2, ImageOff, Search, ChevronDown } from 'lucide-react';
+import { Send, X, FileVideo, FileText, AlertTriangle, RotateCcw, UploadCloud, User, Info, Check, CheckCheck, Camera, Loader2, ImageOff, Search, Inbox, ArrowLeft, MessageCircle, AlertCircle, Clock, CheckCircle2, ChevronRight, PenSquare } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Attachment } from '../types';
 import { AttachmentModal } from './AttachmentModal';
 import { TypewriterText } from './TypewriterText';
 import { playAiThinkingSound, playAiDoneSound, playErrorSound, playMessageSentSound, playMenuOpenSound, playMenuCloseSound, playSendAirplaneSound, playMarbleDropSound } from '../utils/audio';
+
+const STATUS_CONFIG: Record<string, any> = {
+  Menunggu: { color: 'bg-slate-100 text-slate-600 border-slate-200', icon: Clock },
+  Ditinjau: { color: 'bg-amber-100 text-amber-700 border-amber-200', icon: Search },
+  Diproses: { color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Loader2 },
+  Selesai: { color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
+};
 
 // --- AI Thinking text phases (tanpa emoticon) ---
 const THINKING_PHASES = [
@@ -63,6 +70,7 @@ export function CitizenChatView() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Chat State ---
+  const [showInbox, setShowInbox] = useState(false);
   const [inputText, setInputText] = useState('');
   const [viewingAttachment, setViewingAttachment] = useState<Attachment | null>(null);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
@@ -72,19 +80,6 @@ export function CitizenChatView() {
   const chatFileInputRef = useRef<HTMLInputElement>(null);
   const chatDocInputRef = useRef<HTMLInputElement>(null);
 
-  // --- Scroll State ---
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-  const [showScrollButton, setShowScrollButton] = useState(false);
-
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    setShowScrollButton(scrollHeight - scrollTop - clientHeight > 150);
-  };
-
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   // --- AI Thinking Animation State ---
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzingMessageId, setAnalyzingMessageId] = useState<string | null>(null);
@@ -92,32 +87,6 @@ export function CitizenChatView() {
   const [isFadingOut, setIsFadingOut] = useState(false);
   const analyzeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const phaseTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // --- Status Notification State ---
-  const [statusNotif, setStatusNotif] = useState<{ show: boolean, text: string }>({ show: false, text: '' });
-  const notifTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevStatusRef = useRef(activeReport?.status);
-
-  // Trigger notification when status changes
-  useEffect(() => {
-    if (activeReport && prevStatusRef.current && prevStatusRef.current !== activeReport.status) {
-      if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current);
-      setStatusNotif({ show: true, text: 'Status berhasil diubah' });
-      notifTimeoutRef.current = setTimeout(() => {
-        setStatusNotif(prev => ({ ...prev, show: false }));
-      }, 3000);
-    }
-    prevStatusRef.current = activeReport?.status;
-  }, [activeReport?.status, activeReport]);
-
-  const handleDotMouseEnter = () => {
-    if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current);
-    setStatusNotif({ show: true, text: 'Status aduan saat ini' });
-  };
-
-  const handleDotMouseLeave = () => {
-    setStatusNotif(prev => ({ ...prev, show: false }));
-  };
 
   const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -133,6 +102,14 @@ export function CitizenChatView() {
       if (phaseTimerRef.current) clearInterval(phaseTimerRef.current);
     };
   }, []);
+
+  // Update read status for active report
+  useEffect(() => {
+    if (activeReport && activeReport.messages.length > 0) {
+      const lastMsg = activeReport.messages[activeReport.messages.length - 1];
+      sessionStorage.setItem(`citizenRead_${activeReport.id}`, lastMsg.id);
+    }
+  }, [activeReport, activeReport?.messages.length]);
 
   // =============================================
   //  SUBMISSION PAGE HANDLERS
@@ -291,7 +268,7 @@ export function CitizenChatView() {
     setSessionId(reportId);
     sessionStorage.setItem('citizenSessionReportId', reportId);
 
-    const textForAnalysis = complaintText.trim() || 'Laporan dengan bukti visual';
+    const textForAnalysis = complaintText.trim();
     const analysis = analyzeComplaint(textForAnalysis);
 
     // Create the report
@@ -302,49 +279,29 @@ export function CitizenChatView() {
       aiPriorityScore: analysis.score,
       status: 'Menunggu',
       date: now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
-      originalComplaint: complaintText.trim() || 'Laporan dengan bukti visual',
-      preview: complaintText.trim().slice(0, 60) || 'Bukti visual dikirim',
+      originalComplaint: textForAnalysis,
+      preview: textForAnalysis.slice(0, 60),
       attachments: [],
       messages: [],
     });
 
-    // Send first message: evidence (foto/video)
-    let evidenceMsgId: string | undefined;
+    // Send first message: text + optional evidence
+    const textMsgId = `msg-text-${Date.now()}`;
+    addMessage(reportId, {
+      id: textMsgId,
+      sender: 'citizen',
+      text: textForAnalysis,
+      timestamp: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      status: 'sent',
+      attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
+    });
 
-    if (pendingAttachments.length > 0) {
-      evidenceMsgId = `msg-evidence-${Date.now()}`;
-
-      addMessage(reportId, {
-        id: evidenceMsgId,
-        sender: 'citizen',
-        text: '',
-        timestamp: now.toLocaleTimeString('id-ID', {
-          hour: '2-digit',
-          minute: '2-digit'
-        }),
-        status: 'sent',
-        attachments: pendingAttachments,
-      });
-    }
-
-    // If there's optional complaint text, send it as a second message
-    if (complaintText.trim()) {
-      const textMsgId = `msg-text-${Date.now()}`;
-      addMessage(reportId, {
-        id: textMsgId,
-        sender: 'citizen',
-        text: complaintText.trim(),
-        timestamp: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-        status: 'sent',
-      });
-
-      // AI Name extraction
-      const nameMatch = complaintText.match(/(?:nama saya|perkenalkan saya|nama aku|aku|saya)\s+(?!(?:mau|ingin|sedang|melihat|lapor|menemukan|di|ke|dari|juga|tidak|sudah|belum|baru|akan|dapat|bisa|harap|mohon|adalah|cuma|hanya|lagi|pernah|selalu|bukan|minta|butuh|lihat|dengar|tahu|pikir|rasa)\b)([A-Za-z]{3,20})/i);
-      if (nameMatch && nameMatch[1]) {
-        const extractedName = nameMatch[1];
-        if (extractedName.toLowerCase() !== 'warga' && extractedName.toLowerCase() !== 'anonim') {
-          updateCitizenName(reportId, extractedName.charAt(0).toUpperCase() + extractedName.slice(1));
-        }
+    // AI Name extraction
+    const nameMatch = complaintText.match(/(?:nama saya|perkenalkan saya|nama aku|aku|saya)\s+(?!(?:mau|ingin|sedang|melihat|lapor|menemukan|di|ke|dari|juga|tidak|sudah|belum|baru|akan|dapat|bisa|harap|mohon|adalah|cuma|hanya|lagi|pernah|selalu|bukan|minta|butuh|lihat|dengar|tahu|pikir|rasa)\b)([A-Za-z]{3,20})/i);
+    if (nameMatch && nameMatch[1]) {
+      const extractedName = nameMatch[1];
+      if (extractedName.toLowerCase() !== 'warga' && extractedName.toLowerCase() !== 'anonim') {
+        updateCitizenName(reportId, extractedName.charAt(0).toUpperCase() + extractedName.slice(1));
       }
     }
 
@@ -353,7 +310,7 @@ export function CitizenChatView() {
     setComplaintText('');
 
     // Start AI analyzing animation → auto-reply after ~5s
-    startAnalyzingAnimation(reportId);
+    startAnalyzingAnimation(reportId, textMsgId);
   };
 
   // =============================================
@@ -534,7 +491,7 @@ export function CitizenChatView() {
   // =============================================
   if (sessionId && !state.isLoaded) {
     return (
-      <div className="max-w-md mx-auto h-full flex flex-col items-center justify-center bg-[#f0f2f5] shadow-sm w-full">
+      <div className="max-w-[400px] mx-auto h-full flex flex-col items-center justify-center bg-[#f0f2f5] shadow-md border-x border-slate-200 w-full">
         <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-3" />
         <p className="text-sm text-slate-500 font-medium">Memuat data laporan...</p>
       </div>
@@ -547,7 +504,7 @@ export function CitizenChatView() {
   if (!activeReport) {
     return (
       <div
-        className="max-w-md mx-auto h-full flex flex-col bg-[#f0f2f5] shadow-sm relative w-full"
+        className="max-w-[400px] mx-auto h-full flex flex-col bg-[#f0f2f5] shadow-md border-x border-slate-200 relative w-full"
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -564,19 +521,13 @@ export function CitizenChatView() {
         )}
 
         {/* Header */}
-        <div className="bg-white px-4 py-3 border-b border-slate-200 flex items-center gap-3 shrink-0 shadow-sm z-10 relative">
-          <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center shrink-0 border border-slate-200 shadow-sm">
-            <User className="w-6 h-6 text-slate-500" />
+        <div className="bg-white px-5 py-4 border-b border-slate-200 flex items-center gap-4 shrink-0 shadow-sm z-10 relative">
+          <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center shrink-0 border border-blue-100 shadow-sm transform -rotate-2">
+            <MessageCircle className="w-6 h-6 text-blue-600" />
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-slate-900 leading-tight">Admin TeksAduan AI</h2>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-              <span className="text-xs font-semibold text-emerald-600">Terhubung dengan Admin</span>
-            </div>
+          <div className="flex-1">
+            <h2 className="text-xl font-bold text-slate-900 leading-tight">Layanan Pengaduan</h2>
+            <p className="text-xs font-medium text-slate-500 mt-0.5">Sampaikan masalah di lingkungan Anda</p>
           </div>
         </div>
 
@@ -585,7 +536,7 @@ export function CitizenChatView() {
           {/* Title */}
           <div className="text-center mb-2">
             <h3 className="text-lg font-bold text-slate-900">Ajukan Pengaduan</h3>
-            <p className="text-sm text-slate-500 mt-1">Jelaskan keluhan Anda terlebih dahulu. Foto/video dapat ditambahkan sebagai bukti pendukung.</p>
+            <p className="text-sm text-slate-500 mt-1">Ceritakan detail masalah di lingkungan Anda untuk memulai laporan</p>
           </div>
 
           {/* Upload Area */}
@@ -610,7 +561,7 @@ export function CitizenChatView() {
             <div className={`p-4 rounded-full mb-3 ${pendingAttachments.length > 0 ? 'bg-blue-100' : 'bg-slate-100'}`}>
               <Camera className={`w-8 h-8 ${pendingAttachments.length > 0 ? 'text-blue-600' : 'text-slate-400'}`} />
             </div>
-            <p className="font-semibold text-blue-600 text-base">Upload Foto / Video</p>
+            <p className="font-semibold text-blue-600 text-base">Upload Foto / Video (Opsional)</p>
             <p className="text-sm text-slate-400 mt-1.5">atau drop file ke sini</p>
             <p className="text-xs text-slate-400 mt-1">Maksimal 10MB per file</p>
           </div>
@@ -649,10 +600,10 @@ export function CitizenChatView() {
             </div>
           )}
 
-          {/* Optional Complaint Text */}
+          {/* Complaint Text */}
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2">
-              Deskripsi Keluhan
+              Deskripsi Keluhan <span className="text-red-500">*</span>
             </label>
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
               <textarea
@@ -672,7 +623,7 @@ export function CitizenChatView() {
             disabled={!complaintText.trim()}
             className="w-full bg-[#00a884] text-white font-semibold py-3.5 rounded-xl hover:bg-[#008f6f] disabled:opacity-50 disabled:bg-slate-200 disabled:text-slate-500 transition-colors shadow-sm flex items-center justify-center gap-2 text-base"
           >
-            {pendingAttachments.length === 0 ? (
+            {!complaintText.trim() ? (
               'Isi deskripsi terlebih dahulu'
             ) : (
               <>
@@ -682,6 +633,137 @@ export function CitizenChatView() {
             )}
           </button>
         </div>
+
+        {/* BOTTOM NAV BAR (SUBMIT PHASE) */}
+        <div className="bg-white border-t border-slate-200 flex justify-around p-2 shrink-0 shadow-[0_-4px_6px_-1px_rgb(0,0,0,0.05)] z-20 relative">
+          <button
+            onClick={() => {
+              setSessionId(null);
+              sessionStorage.removeItem('citizenSessionReportId');
+              setShowInbox(false);
+              playMenuCloseSound();
+            }}
+            className={`flex-1 flex flex-col items-center justify-center py-2 px-4 rounded-xl transition-all text-[#00a884] bg-[#00a884]/10`}
+          >
+            <PenSquare className="w-6 h-6 mb-1" />
+            <span className="text-[11px] font-bold">Buat Laporan</span>
+          </button>
+          <button
+            onClick={() => {
+              setShowInbox(true);
+              playMenuOpenSound();
+            }}
+            className={`flex-1 flex flex-col items-center justify-center py-2 px-4 rounded-xl transition-all relative text-slate-500 hover:bg-slate-50`}
+          >
+            <div className="relative">
+              <Inbox className="w-6 h-6 mb-1" />
+              {state.reports.some(r => {
+                const lastMsg = r.messages[r.messages.length - 1];
+                const lastRead = sessionStorage.getItem(`citizenRead_${r.id}`);
+                return lastMsg?.sender === 'admin' && lastMsg.id !== lastRead;
+              }) && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+              )}
+            </div>
+            <span className="text-[11px] font-bold">Kotak Masuk</span>
+          </button>
+        </div>
+
+        {/* Slide-over Inbox Modal */}
+        {showInbox && (
+          <div className="absolute inset-0 bg-slate-50 z-50 flex flex-col animate-[slideIn_0.2s_ease-out]">
+            <div className="p-4 md:p-6 pb-2 relative shrink-0">
+              <h2 className="text-xl font-bold text-slate-900 mb-1">Riwayat Laporan Saya</h2>
+              <p className="text-sm text-slate-500 mb-6">Semua laporan dan status penanganannya.</p>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-6">
+              {state.reports.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 px-4 text-center mt-8">
+                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm border border-slate-200">
+                    <MessageCircle className="w-8 h-8 text-slate-300" />
+                  </div>
+                  <p className="text-slate-600 font-semibold">Belum ada laporan</p>
+                  <p className="text-sm text-slate-500 mt-2">Buat laporan pertama Anda sekarang.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {state.reports.map(r => {
+                    const lastMessage = r.messages[r.messages.length - 1];
+                    const lastReadId = sessionStorage.getItem(`citizenRead_${r.id}`);
+                    const hasAdminResponse = lastMessage?.sender === 'admin' && lastMessage.id !== lastReadId;
+                    const statusConfig = STATUS_CONFIG[r.status] || STATUS_CONFIG['Menunggu'];
+                    const StatusIcon = statusConfig.icon;
+                    
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() => {
+                          setSessionId(r.id);
+                          sessionStorage.setItem('citizenSessionReportId', r.id);
+                          setShowInbox(false);
+                          playMenuCloseSound();
+                        }}
+                        className="w-full bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all text-left flex items-start justify-between group"
+                      >
+                        <div className="flex-1 pr-4">
+                          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                            <span className="font-semibold text-slate-900 text-sm">{r.id}</span>
+                            <span className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusConfig.color}`}>
+                              <StatusIcon className="w-3 h-3" />
+                              {r.status}
+                            </span>
+                            {hasAdminResponse && (
+                              <span className="flex items-center gap-1 text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full border border-red-200">
+                                <AlertCircle className="w-3 h-3" /> Ada Balasan
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-400 mb-2 font-medium">{r.date} · {r.aiCategory}</p>
+                          <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">
+                            {lastMessage?.text || r.preview}
+                          </p>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500 mt-2 flex-shrink-0 transition-colors" />
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* BOTTOM NAV BAR (INBOX PHASE) */}
+            <div className="bg-white border-t border-slate-200 flex justify-around p-2 shrink-0 shadow-[0_-4px_6px_-1px_rgb(0,0,0,0.05)] z-20 relative">
+              <button
+                onClick={() => {
+                  setSessionId(null);
+                  sessionStorage.removeItem('citizenSessionReportId');
+                  setShowInbox(false);
+                  playMenuCloseSound();
+                }}
+                className={`flex-1 flex flex-col items-center justify-center py-2 px-4 rounded-xl transition-all text-slate-500 hover:bg-slate-50`}
+              >
+                <PenSquare className="w-6 h-6 mb-1" />
+                <span className="text-[11px] font-bold">Buat Laporan</span>
+              </button>
+              <button
+                onClick={() => {
+                  setShowInbox(true);
+                  playMenuOpenSound();
+                }}
+                className={`flex-1 flex flex-col items-center justify-center py-2 px-4 rounded-xl transition-all relative text-[#00a884] bg-[#00a884]/10`}
+              >
+                <div className="relative">
+                  <Inbox className="w-6 h-6 mb-1" />
+                  {state.reports.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+                  )}
+                </div>
+                <span className="text-[11px] font-bold">Kotak Masuk</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -690,65 +772,32 @@ export function CitizenChatView() {
   //  RENDER: CHAT VIEW (Fase 2)
   // =============================================
   return (
-    <div className="max-w-md mx-auto h-full flex flex-col bg-[#f0f2f5] shadow-sm relative w-full">
+    <div className="max-w-[400px] mx-auto h-full flex flex-col bg-[#f0f2f5] shadow-md border-x border-slate-200 relative w-full">
       {/* Header */}
       <div className="bg-white px-4 py-3 border-b border-slate-200 flex items-center gap-3 shrink-0 shadow-sm z-10 relative">
-        <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center shrink-0 border border-slate-200 shadow-sm">
-          <User className="w-6 h-6 text-slate-500" />
+        <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center shrink-0 border border-slate-200 shadow-sm">
+          <User className="w-5 h-5 text-slate-500" />
         </div>
         <div className="flex-1">
-          <h2 className="text-lg font-bold text-slate-900 leading-tight">Admin TeksAduan AI</h2>
+          <h2 className="text-base font-bold text-slate-900 leading-tight">Admin TeksAduan AI</h2>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="relative flex h-2.5 w-2.5">
+            <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            <span className="text-xs font-semibold text-emerald-600">Terhubung dengan Admin</span>
+            <span className="text-[10px] font-semibold text-emerald-600">Terhubung dengan Admin</span>
           </div>
         </div>
-
-        {/* Status Dot & Notification Pill */}
-        {activeReport && (
-          <div 
-            className="flex items-center justify-center p-2 cursor-pointer relative"
-            onMouseEnter={handleDotMouseEnter}
-            onMouseLeave={handleDotMouseLeave}
-          >
-            <div className={`w-3.5 h-3.5 rounded-full shadow-sm ${
-              activeReport.status === 'Menunggu' ? 'bg-slate-400' :
-              activeReport.status === 'Ditinjau' ? 'bg-yellow-400' :
-              activeReport.status === 'Diproses' ? 'bg-blue-500' :
-              'bg-emerald-500'
-            }`} />
-
-            {/* Notification Pill */}
-            <div 
-              className={`absolute top-full right-0 mt-2 z-50 flex items-center gap-2.5 px-4 py-2.5 bg-white/95 backdrop-blur-md rounded-[20px] shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-100 transition-all duration-300 origin-top-right w-max ${
-                statusNotif.show 
-                  ? 'opacity-100 scale-100 translate-y-0' 
-                  : 'opacity-0 scale-95 pointer-events-none -translate-y-2'
-              }`}
-            >
-              {/* Icon matching status color */}
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 shadow-sm ${
-                  activeReport.status === 'Menunggu' ? 'bg-slate-400' :
-                  activeReport.status === 'Ditinjau' ? 'bg-yellow-400' :
-                  activeReport.status === 'Diproses' ? 'bg-blue-500' :
-                  'bg-emerald-500'
-              }`}>
-                 <div className="w-2 h-2 bg-white rounded-full opacity-80" />
-              </div>
-              <div className="flex flex-col items-start pr-1">
-                <span className="text-[13px] font-bold text-slate-900 leading-none tracking-tight mb-1">
-                  {activeReport.status}
-                </span>
-                <span className="text-[10px] text-slate-500 font-medium leading-none">
-                  {statusNotif.text}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
+        <button 
+          onClick={() => { setShowInbox(true); playMenuOpenSound(); }}
+          className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors relative"
+          title="Buka Kotak Masuk"
+        >
+          <Inbox className="w-6 h-6" />
+          {state.reports.length > 0 && (
+            <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+          )}
+        </button>
       </div>
 
       {/* Auto-Delete Warning Banner */}
@@ -762,7 +811,7 @@ export function CitizenChatView() {
       )}
 
       {/* Chat Body */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6" ref={chatContainerRef} onScroll={handleScroll}>
+      <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {/* Welcome Info */}
         <div className="flex justify-center mb-4 mt-4">
           <div className="bg-blue-100/50 text-blue-800 text-xs font-semibold px-4 py-2 rounded-full border border-blue-200">
@@ -885,21 +934,38 @@ export function CitizenChatView() {
           </div>
         )}
 
-        {/* Spotlight-style attachment preview has been moved out of the scrollable area */}
+        {/* Pending Local Attachment Preview in Chat */}
+        <div className={`flex justify-end transition-all duration-500 ease-out origin-bottom-right ${pendingChatAttachments.length > 0 ? 'opacity-100 scale-100 max-h-[600px] mb-4' : 'opacity-0 scale-50 max-h-0 mb-0 overflow-hidden'}`}>
+           <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-sm bg-[#d9fdd3] text-[#111b21] shadow-sm p-1.5 pb-2 relative">
+             <button onClick={() => { setPendingChatAttachments([]); playMarbleDropSound(); }} className="absolute -top-2 -left-2 bg-slate-800 text-white p-1 rounded-full shadow-md z-10">
+               <X className="w-3 h-3" />
+             </button>
+             <div className={`grid gap-1 mb-1 ${pendingChatAttachments.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {pendingChatAttachments.map((att, idx) => (
+                  <div key={idx} className="relative aspect-square">
+                    {att.type === 'image' ? (
+                      <img src={att.url} alt="Attached" className="w-full h-full object-cover rounded-lg" />
+                    ) : att.type === 'video' ? (
+                      <div className="w-full h-full bg-slate-800 rounded-lg flex items-center justify-center">
+                        <FileVideo className="w-10 h-10 text-white/70" />
+                      </div>
+                    ) : (
+                       <div className="w-full h-full bg-white/50 rounded-lg flex flex-col items-center justify-center p-2 border border-slate-200">
+                         <FileText className="w-8 h-8 text-blue-500 mb-2" />
+                         <span className="text-xs text-center truncate w-full">{att.name}</span>
+                       </div>
+                    )}
+                  </div>
+                ))}
+             </div>
+             <div className="flex items-center justify-end gap-1 px-1 mt-1">
+                 <span className="text-[11px] text-slate-500">{new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                 <Loader2 className="w-3 h-3 text-slate-400 animate-spin" />
+             </div>
+           </div>
+        </div>
 
         <div ref={chatEndRef} />
-      </div>
-
-
-
-      {/* Scroll to Bottom Button */}
-      <div className={`absolute right-4 bottom-24 z-40 transition-all duration-300 ${showScrollButton ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-4 scale-50 pointer-events-none'}`}>
-        <button
-          onClick={scrollToBottom}
-          className="w-9 h-9 bg-white/90 backdrop-blur-md rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.15)] border border-slate-200 flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-white transition-colors"
-        >
-          <ChevronDown className="w-5 h-5" />
-        </button>
       </div>
 
       {/* Chat Input Footer */}
@@ -996,23 +1062,14 @@ export function CitizenChatView() {
         </div>
       </div>
 
-
-
       {/* Spotlight-like Description Input Overlay */}
       <div 
-        className={`absolute inset-0 z-[60] flex flex-col items-center justify-center bg-black/5 transition-all duration-500 pointer-events-none ${pendingChatAttachments.length > 0 ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-x-0 bottom-24 z-[60] flex flex-col items-center justify-end transition-all duration-500 pointer-events-none ${pendingChatAttachments.length > 0 ? 'opacity-100' : 'opacity-0'}`}
       >
-        <div className={`w-[90%] max-w-lg pointer-events-auto z-[70] relative bg-transparent backdrop-blur-[8px] backdrop-saturate-[200%] rounded-[3rem] shadow-[0_25px_50px_rgba(0,0,0,0.5)] flex items-center p-1.5 transform transition-all duration-500 ${pendingChatAttachments.length > 0 ? 'scale-100 translate-y-0' : 'scale-90 translate-y-10'}`}>
-          
-          {/* Reactive Bezel Layer (Absorbs underlying colors via mix-blend-overlay) */}
-          <div className="absolute inset-0 rounded-[3rem] pointer-events-none mix-blend-overlay shadow-[inset_0_0_0_2px_rgba(255,255,255,0.6),inset_0_4px_12px_rgba(255,255,255,1),inset_0_15px_30px_rgba(255,255,255,0.6)]"></div>
-          
-          {/* Deep Volume Shadow Layer */}
-          <div className="absolute inset-0 rounded-[3rem] pointer-events-none shadow-[inset_0_-15px_30px_rgba(0,0,0,0.4)]"></div>
-
+        <div className={`w-[92%] max-w-md pointer-events-auto bg-slate-800/90 backdrop-blur-xl rounded-[2rem] shadow-2xl border border-slate-600/50 flex items-center p-1.5 transform transition-all duration-500 ${pendingChatAttachments.length > 0 ? 'scale-100 translate-y-0' : 'scale-90 translate-y-10'}`}>
           <button 
              onClick={() => { setPendingChatAttachments([]); playMarbleDropSound(); }} 
-             className="relative z-10 w-10 h-10 rounded-full flex items-center justify-center text-slate-600 hover:text-white transition-all duration-200 ml-1 shrink-0 overflow-hidden group hover:scale-105 hover:shadow-[0_4px_15px_rgba(239,68,68,0.5),inset_0_2px_3px_rgba(255,255,255,0.4)] active:scale-95 active:brightness-50"
+             className="relative w-10 h-10 rounded-full flex items-center justify-center text-white/60 transition-all duration-200 ml-1 shrink-0 overflow-hidden group hover:scale-105 hover:text-white hover:shadow-[0_4px_15px_rgba(239,68,68,0.5),inset_0_2px_3px_rgba(255,255,255,0.4)] active:scale-95 active:brightness-50"
              title="Batalkan"
           >
              <div className="absolute inset-0 bg-gradient-to-b from-red-400 to-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-0"></div>
@@ -1022,7 +1079,7 @@ export function CitizenChatView() {
              type="text"
              autoFocus={pendingChatAttachments.length > 0}
              placeholder="Tambahkan keterangan (opsional)..."
-             className="relative z-10 flex-1 bg-transparent border-none focus:ring-0 text-slate-800 text-[17px] px-3 py-3 outline-none placeholder:text-slate-500/90 font-medium"
+             className="flex-1 bg-transparent border-0 focus:ring-0 text-white text-[17px] px-3 py-3 outline-none placeholder:text-white/50 font-medium"
              value={spotlightText}
              onChange={e => setSpotlightText(e.target.value)}
              onKeyDown={e => {
@@ -1031,18 +1088,88 @@ export function CitizenChatView() {
           />
           <button 
             onClick={handleSendSpotlightDescription} 
-            className="relative z-10 w-11 h-11 rounded-full bg-gradient-to-b from-blue-400 to-blue-500 flex items-center justify-center text-white hover:brightness-110 shadow-[inset_0_2px_3px_rgba(255,255,255,0.4),0_4px_15px_rgba(59,130,246,0.5)] transition shrink-0 hover:scale-105 mr-1"
+            className="w-11 h-11 rounded-full bg-gradient-to-b from-blue-400 to-blue-500 flex items-center justify-center text-white hover:brightness-110 shadow-[inset_0_2px_3px_rgba(255,255,255,0.4),0_4px_15px_rgba(59,130,246,0.5)] transition shrink-0 hover:scale-105 mr-1"
           >
              <Send className="w-5 h-5 ml-0.5 drop-shadow-sm" />
           </button>
         </div>
       </div>
 
-      {/* Lightbox Modal */}
-      <AttachmentModal
-        attachment={viewingAttachment}
-        onClose={() => setViewingAttachment(null)}
+      {/* Lightbox Modal for Attachments */}
+      <AttachmentModal 
+        attachment={viewingAttachment} 
+        onClose={() => setViewingAttachment(null)} 
       />
+
+      {/* Slide-over Inbox Modal */}
+      {showInbox && (
+        <div className="absolute inset-0 bg-slate-50 z-50 flex flex-col animate-[slideIn_0.2s_ease-out]">
+          <div className="bg-white px-4 py-3 flex items-center gap-3 border-b border-slate-200 shadow-sm shrink-0">
+            <button 
+              onClick={() => { setShowInbox(false); playMenuCloseSound(); }} 
+              className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <ArrowLeft className="w-6 h-6" />
+            </button>
+            <h2 className="font-bold text-lg text-slate-900">Riwayat Laporan Saya</h2>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-6">
+            {state.reports.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 px-4 text-center mt-8">
+                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm border border-slate-200">
+                  <MessageCircle className="w-8 h-8 text-slate-300" />
+                </div>
+                <p className="text-slate-600 font-semibold">Belum ada laporan</p>
+                <p className="text-sm text-slate-500 mt-2">Buat laporan pertama Anda sekarang.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {state.reports.map(r => {
+                  const lastMessage = r.messages[r.messages.length - 1];
+                  const lastReadId = sessionStorage.getItem(`citizenRead_${r.id}`);
+                  const hasAdminResponse = lastMessage?.sender === 'admin' && lastMessage.id !== lastReadId;
+                  const statusConfig = STATUS_CONFIG[r.status] || STATUS_CONFIG['Menunggu'];
+                  const StatusIcon = statusConfig.icon;
+                  
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => {
+                        setSessionId(r.id);
+                        sessionStorage.setItem('citizenSessionReportId', r.id);
+                        setShowInbox(false);
+                        playMenuCloseSound();
+                      }}
+                      className="w-full bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all text-left flex items-start justify-between group"
+                    >
+                      <div className="flex-1 pr-4">
+                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                          <span className="font-semibold text-slate-900 text-sm">{r.id}</span>
+                          <span className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusConfig.color}`}>
+                            <StatusIcon className="w-3 h-3" />
+                            {r.status}
+                          </span>
+                          {hasAdminResponse && (
+                            <span className="flex items-center gap-1 text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full border border-red-200">
+                              <AlertCircle className="w-3 h-3" /> Ada Balasan
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mb-2 font-medium">{r.date} · {r.aiCategory}</p>
+                        <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">
+                          {lastMessage?.text || r.preview}
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500 mt-2 flex-shrink-0 transition-colors" />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

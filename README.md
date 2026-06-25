@@ -1,20 +1,48 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# AduanAI (TeksAduan)
 
-# Run and deploy your AI Studio app
+AduanAI adalah platform layanan pengaduan masyarakat berbasis antarmuka chat. Aplikasi ini dibangun untuk mempermudah komunikasi dua arah antara warga dan admin instansi terkait, dengan memanfaatkan integrasi AI untuk klasifikasi awal.
 
-This contains everything you need to run your app locally.
+## Daftar Fitur
 
-View your app in AI Studio: https://ai.studio/apps/297ded1c-f43e-434c-b2de-ad04bbee8bfb
+Sistem ini terbagi menjadi dua bagian utama:
 
-## Run Locally
+1. Warga (Citizen View)
+- Tampilan web dibuat spesifik untuk resolusi mobile dengan bottom navigation bar agar terasa seperti aplikasi native.
+- Form pengaduan yang menerima input teks (wajib) dan lampiran foto/video.
+- Obrolan (chat) secara realtime dengan admin untuk setiap laporan yang dibuat.
+- Sistem secara otomatis mengklasifikasikan kategori dan menghitung skor prioritas dari deskripsi masalah yang dikirimkan menggunakan AI.
+- Halaman inbox untuk melacak status laporan beserta riwayat percakapan.
 
-**Prerequisites:**  Node.js
+2. Admin (Dashboard View)
+- Halaman panel admin untuk melihat semua laporan masuk secara terpusat.
+- Dapat melihat laporan mana yang memiliki prioritas tinggi berdasarkan hasil analisis AI.
+- Admin bisa mengubah status tiket (misalnya menjadi Ditinjau atau Diproses) dan membalas pesan warga.
 
+## Stack Teknologi
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- Frontend: React (Vite), TypeScript, TailwindCSS
+- Backend: Node.js, Express
+- Realtime Engine: Socket.io
+
+## Cara Menjalankan Project (Lokal)
+
+Pastikan Node.js versi 16+ sudah terinstall. Karena menggunakan arsitektur client-server dan websocket, Anda perlu menjalankan backend dan frontend di dua terminal yang berbeda.
+
+### 1. Menjalankan Backend Server
+Masuk ke folder server dan jalankan:
+
+```bash
+cd server
+npm install
+node index.js
+```
+Backend akan berjalan di port 3001.
+
+### 2. Menjalankan Frontend
+Buka terminal baru pada root direktori project:
+
+```bash
+npm install
+npm run dev
+```
+Akses frontend melalui browser di localhost:3000.
